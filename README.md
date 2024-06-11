@@ -37,7 +37,7 @@ cd /opt/passbolt
 
 Описание переменных указано в .env
 
-4. Создать каталог /opt/passbolt/secrets -p `mkdir -p /opt/passbolt/secrets -p`
+4. Создать каталог /opt/passbolt/secrets `mkdir -p /opt/passbolt/secrets -p`
 5. Записать желаемый пароль к СУБД в /opt/passbolt/secrets/mysql_password.secret
 ```
 echo '$uper$ecretPa$$w0rd' > /opt/passbolt/secrets/mysql_password.secret'
