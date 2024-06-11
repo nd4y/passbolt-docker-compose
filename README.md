@@ -11,11 +11,11 @@ Reverse Proxy. Терминирует TLS, автоматически получ
 СУБД. Хранит базу данных с конфигурацией и паролями Passbolt
 
 ### Требования для установки
-1. Сервер с установленным Docker Compose, 
+1. Сервер с установленным Docker Compose 
 2. Свободные порты 80/TCP и 443/TCP на сервере
 3. Доступ с сервера в Интернет для ACME. Доступ к серверу из Интернет опционален.
 4. Доменное имя в DNS зоне, делегированной Cloudflare (при использовании внутреннего DNS, создавать A запись в DNS зоне на публичном DNS сервере не требуется)
-5. API Token (не API Key) Cloudflare с правами Zone:Read, DNS:Edit
+5. API Token (не API Key) Cloudflare для зоны с правами Zone:Read, DNS:Edit для зоны, используемой в доменном имени Passbolt
 ### Установка
 1. Клонировать репозиторий в /opt/passbolt 
 
@@ -36,6 +36,7 @@ cd /opt/passbolt
 - PASSBOLT_EMAIL_TRANSPORT_DEFAULT_TLS
 
 Описание переменных указано в .env
+
 4. Создать каталог /opt/passbolt/secrets -p `mkdir -p /opt/passbolt/secrets -p`
 5. Записать желаемый пароль к СУБД в /opt/passbolt/secrets/mysql_password.secret
 ```
