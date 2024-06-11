@@ -1,0 +1,157 @@
+networks:
+  passbolt-network:
+    external: false
+  traefik-network:
+    external: false
+
+volumes:
+  passbolt_mysql_data_volume:
+  passbolt_passbolt_gpg_volume:
+  passbolt_passbolt_jwt_volume:
+  passbolt_traefik_acme_volume:
+
+services:
+  mysql:
+    image: ${MYSQL_IMAGE_TAG}
+    restart: always
+    environment:
+      MYSQL_RANDOM_ROOT_PASSWORD: "true"
+      MYSQL_DATABASE: "${MYSQL_DATABASE_NAME}"
+      MYSQL_USER: "${MYSQL_USERNAME}"
+      MYSQL_PASSWORD: "/run/secrets/mysql_password"
+    networks:
+      - passbolt-network
+    volumes:
+      - passbolt_mysql_data_volume:/var/lib/mysql
+    secrets:
+      - "mysql_password"
+    healthcheck:
+      test: mysqladmin ping -h 127.0.0.1 -u $$MYSQL_USER --password=$$MYSQL_PASSWORD
+      start_period: 5s
+      interval: 5s
+      timeout: 5s
+      retries: 55
+
+  passbolt:
+    image: ${PASSBOLT_IMAGE_TAG}
+    restart: always
+    depends_on:
+      mysql:
+        condition: service_healthy
+      traefik:
+        condition: service_started
+    networks:
+      - passbolt-network
+      - traefik-network
+    volumes:
+      - passbolt_passbolt_gpg_volume:/etc/passbolt/gpg
+      - passbolt_passbolt_jwt_volume:/etc/passbolt/jwt
+    secrets:
+      - "mysql_password"
+      - "passbotl_email_transport_default_password"
+    environment:
+      APP_FULL_BASE_URL: https://${PASSBOLT_HOSTNAME}
+      DATASOURCES_DEFAULT_HOST: "mysql"
+      DATASOURCES_DEFAULT_USERNAME: "${MYSQL_USERNAME}"
+      DATASOURCES_DEFAULT_PASSWORD: "/run/secrets/mysql_password"
+      DATASOURCES_DEFAULT_DATABASE: "${MYSQL_DATABASE_NAME}"
+      EMAIL_DEFAULT_FROM_NAME: "${PASSBOLT_EMAIL_DEFAULT_FROM_NAME}"
+      EMAIL_DEFAULT_FROM: "${PASSBOLT_EMAIL_DEFAULT_FROM}"
+      EMAIL_TRANSPORT_DEFAULT_HOST: "${PASSBOLT_EMAIL_TRANSPORT_DEFAULT_HOST}"
+      EMAIL_TRANSPORT_DEFAULT_PORT: "${PASSBOLT_EMAIL_TRANSPORT_DEFAULT_PORT}"
+      EMAIL_TRANSPORT_DEFAULT_USERNAME: "${PASSBOLT_EMAIL_TRANSPORT_DEFAULT_USERNAME}"
+      EMAIL_TRANSPORT_DEFAULT_PASSWORD: "/run/secrets/passbotl_email_transport_default_password"
+      EMAIL_TRANSPORT_DEFAULT_TLS: "${PASSBOLT_EMAIL_TRANSPORT_DEFAULT_TLS}"
+    command:
+      [
+        "/usr/bin/wait-for.sh",
+        "-t",
+        "0",
+        "mysql:3306",
+        "--",
+        "/docker-entrypoint.sh",
+      ]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 90s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.passbolt.rule=Host(`${PASSBOLT_HOSTNAME}`)"
+      - "traefik.http.routers.passbolt.service=passbolt"
+      - "traefik.http.routers.passbolt.entrypoints=websecure"
+      - "traefik.http.services.passbolt.loadbalancer.server.port=80"
+      - "traefik.http.routers.passbolt.tls=true"
+      - "traefik.http.routers.passbolt.tls.certresolver=letsencrypt"
+      - "traefik.http.services.passbolt.loadbalancer.passhostheader=true"
+      - "traefik.http.routers.passbolt.middlewares=compresstraefik"
+      - "traefik.http.middlewares.compresstraefik.compress=true"
+
+  traefik:
+    image: ${TRAEFIK_IMAGE_TAG}
+    restart: always
+    command:
+      - "--log.level=${TRAEFIK_LOG_LEVEL}"
+      - "--accesslog=true"
+      - "--api.dashboard=${TRAEFIK_DASHBOARD_ENABLED}"
+      - "--api.insecure=true"
+      - "--ping=true"
+      - "--ping.entrypoint=ping"
+      - "--entryPoints.ping.address=:8082"
+      - "--entryPoints.web.address=:80"
+      - "--entryPoints.websecure.address=:443"
+      - "--providers.docker=true"
+      - "--providers.docker.endpoint=unix:///var/run/docker.sock"
+      - "--providers.docker.exposedByDefault=false"
+      - "--certificatesresolvers.letsencrypt.acme.dnschallenge=true"
+      - "--certificatesresolvers.letsencrypt.acme.dnschallenge.provider=cloudflare"
+      - "--certificatesresolvers.letsencrypt.acme.caserver=${TRAEFIK_ACME_CA_SERVER_URL}"
+      - "--certificatesresolvers.letsencrypt.acme.email=${TRAEFIK_ACME_EMAIL}"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/acme/acme.json"
+      - "--global.checkNewVersion=true"
+      - "--global.sendAnonymousUsage=false"
+    networks:
+      - passbolt-network
+      - traefik-network
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - passbolt_traefik_acme_volume:/acme
+    secrets:
+      - "cf_api_token"
+    environment:
+      CF_ZONE_API_TOKEN_FILE: '/run/secrets/cf_api_token'
+      CF_DNS_API_TOKEN_FILE: '/run/secrets/cf_api_token'   
+    healthcheck:
+      test: ["CMD", "wget", "http://localhost:8082/ping","--spider"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.dashboard.rule=Host(`${TRAEFIK_HOSTNAME}`)"
+      - "traefik.http.routers.dashboard.service=api@internal"
+      - "traefik.http.routers.dashboard.entrypoints=websecure"
+      - "traefik.http.services.dashboard.loadbalancer.server.port=8080"
+      - "traefik.http.routers.dashboard.tls=true"
+      - "traefik.http.routers.dashboard.tls.certresolver=letsencrypt"
+      - "traefik.http.services.dashboard.loadbalancer.passhostheader=true"
+      - "traefik.http.routers.dashboard.middlewares=authtraefik"
+      - "traefik.http.middlewares.authtraefik.basicauth.users=${TRAEFIK_DASHBOARD_BASIC_AUTH}"
+      - "traefik.http.routers.http-catchall.rule=HostRegexp(`{host:.+}`)"
+      - "traefik.http.routers.http-catchall.entrypoints=web"
+      - "traefik.http.routers.http-catchall.middlewares=redirect-to-https"
+      - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"
+
+secrets:
+  cf_api_token:
+    file: "./secrets/cf_api_token.secret"
+  mysql_password:
+    file: "./secrets/mysql_password.secret"
+  passbotl_email_transport_default_password:
+    file: "./secrets/passbotl_email_transport_default_password.secret"
