@@ -46,6 +46,7 @@ services:
     volumes:
       - passbolt_passbolt_gpg_volume:/etc/passbolt/gpg
       - passbolt_passbolt_jwt_volume:/etc/passbolt/jwt
+      - ${PWD}/mounts/passbolt/nginx/conf.d:/etc/nginx/conf.d:ro
     secrets:
       - "mysql_password"
       - "passbotl_email_transport_default_password"
@@ -72,7 +73,7 @@ services:
         "/docker-entrypoint.sh",
       ]
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:80/"]
+      test: ["CMD", "curl", "-f", "http://localhost:80/healthcheck/status"]
       interval: 10s
       timeout: 5s
       retries: 3
