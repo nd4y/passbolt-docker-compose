@@ -6,6 +6,7 @@ networks:
 
 volumes:
   passbolt_mysql_data_volume:
+  passbolt_mysqlbackup_backups_volume:
   passbolt_passbolt_gpg_volume:
   passbolt_passbolt_jwt_volume:
   passbolt_traefik_acme_volume:
@@ -18,7 +19,7 @@ services:
       MYSQL_RANDOM_ROOT_PASSWORD: "true"
       MYSQL_DATABASE: "${MYSQL_DATABASE_NAME}"
       MYSQL_USER: "${MYSQL_USERNAME}"
-      MYSQL_PASSWORD: "/run/secrets/mysql_password"
+      MYSQL_PASSWORD_FILE: "/run/secrets/mysql_password"
     networks:
       - passbolt-network
     volumes:
@@ -26,11 +27,51 @@ services:
     secrets:
       - "mysql_password"
     healthcheck:
-      test: mysqladmin ping -h 127.0.0.1 -u $$MYSQL_USER --password=$$MYSQL_PASSWORD
+      test: out=$$(mysqladmin ping -h localhost -P 3306 -u ${MYSQL_USERNAME} --password=$$(cat $${MYSQL_PASSWORD_FILE}) 2>&1); echo $$out | grep 'mysqld is alive' || { echo $$out; exit 1; }
       start_period: 5s
       interval: 5s
       timeout: 5s
-      retries: 55
+      retries: 10
+
+  mysqlbackup:
+    image: ${MYSQL_IMAGE_TAG}
+    restart: always
+    depends_on:
+      mysql:
+        condition: service_healthy
+    command: >-
+      bash -c 'echo "$(date) - The container is running. Wait ${MYSQLBACKUP_INIT_SLEEP} seconds before backup starts" &&
+      sleep ${MYSQLBACKUP_INIT_SLEEP} &&
+      while true; do
+        echo "$(date) - Starting mysqldump for database ${MYSQL_DATABASE_NAME}"
+        mysqldump -h mysql -u${MYSQL_USERNAME} -p"$(< /run/secrets/mysql_password)" ${MYSQL_DATABASE_NAME} | gzip > ${MYSQLBACKUP_BACKUPS_PATH}/passbolt-mysql-database-backup-$(date "+%Y-%m-%d-%H-%M").gz &&
+        echo "$(date) - mysqldump for database ${MYSQL_DATABASE_NAME} finished without errors" &&
+        echo "$(date) - Rotating database ${MYSQL_DATABASE_NAME} backup files" &&
+        find ${MYSQLBACKUP_BACKUPS_PATH} -type f -printf "%T@ %p\n" | sort -n | head -n -${MYSQLBACKUP_NUMBER_OF_RECOVERY_POINTS} | cut -d" " -f2- | xargs rm -f &&
+        echo "$(date) - Rotation of database ${MYSQL_DATABASE_NAME} backup files completed without errors" &&
+        echo "$(date) - Sleep ${MYSQLBACKUP_INTERVAL} for the next backup" &&
+        sleep ${MYSQLBACKUP_INTERVAL};
+        done'
+    environment:
+      MYSQL_DATABASE_NAME: ${MYSQL_DATABASE_NAME}
+      MYSQL_USERNAME: ${MYSQL_USERNAME}
+      MYSQL_PASSWORD_FILE: "/run/secrets/mysql_password"
+      MYSQLBACKUP_BACKUPS_PATH: ${MYSQLBACKUP_BACKUPS_PATH}
+      MYSQLBACKUP_NUMBER_OF_RECOVERY_POINTS: ${MYSQLBACKUP_NUMBER_OF_RECOVERY_POINTS}
+      MYSQLBACKUP_INIT_SLEEP: ${MYSQLBACKUP_INIT_SLEEP}
+      MYSQLBACKUP_INTERVAL: ${MYSQLBACKUP_INTERVAL}
+    networks:
+      - passbolt-network
+    volumes:
+      - ${PWD}/mounts/mysqlbackup/backups:${MYSQLBACKUP_BACKUPS_PATH}
+    secrets:
+      - "mysql_password"
+    healthcheck:
+      test: out=$$(mysqladmin ping -h mysql -P 3306 -u ${MYSQL_USERNAME} --password=$$(cat $${MYSQL_PASSWORD_FILE}) 2>&1); echo $$out | grep 'mysqld is alive' || { echo $$out; exit 1; }
+      start_period: 5s
+      interval: 5s
+      timeout: 5s
+      retries: 3
 
   passbolt:
     image: ${PASSBOLT_IMAGE_TAG}
@@ -49,19 +90,19 @@ services:
       - ${PWD}/mounts/passbolt/nginx/conf.d:/etc/nginx/conf.d:ro
     secrets:
       - "mysql_password"
-      - "passbotl_email_transport_default_password"
+      - "passbolt_email_transport_default_password"
     environment:
       APP_FULL_BASE_URL: https://${PASSBOLT_HOSTNAME}
       DATASOURCES_DEFAULT_HOST: "mysql"
       DATASOURCES_DEFAULT_USERNAME: "${MYSQL_USERNAME}"
-      DATASOURCES_DEFAULT_PASSWORD: "/run/secrets/mysql_password"
+      DATASOURCES_DEFAULT_PASSWORD_FILE: /run/secrets/mysql_password
       DATASOURCES_DEFAULT_DATABASE: "${MYSQL_DATABASE_NAME}"
       EMAIL_DEFAULT_FROM_NAME: "${PASSBOLT_EMAIL_DEFAULT_FROM_NAME}"
       EMAIL_DEFAULT_FROM: "${PASSBOLT_EMAIL_DEFAULT_FROM}"
       EMAIL_TRANSPORT_DEFAULT_HOST: "${PASSBOLT_EMAIL_TRANSPORT_DEFAULT_HOST}"
       EMAIL_TRANSPORT_DEFAULT_PORT: "${PASSBOLT_EMAIL_TRANSPORT_DEFAULT_PORT}"
       EMAIL_TRANSPORT_DEFAULT_USERNAME: "${PASSBOLT_EMAIL_TRANSPORT_DEFAULT_USERNAME}"
-      EMAIL_TRANSPORT_DEFAULT_PASSWORD: "/run/secrets/passbotl_email_transport_default_password"
+      EMAIL_TRANSPORT_DEFAULT_PASSWORD: "/run/secrets/passbolt_email_transport_default_password"
       EMAIL_TRANSPORT_DEFAULT_TLS: "${PASSBOLT_EMAIL_TRANSPORT_DEFAULT_TLS}"
     command:
       [
@@ -154,5 +195,5 @@ secrets:
     file: "./secrets/cf_api_token.secret"
   mysql_password:
     file: "./secrets/mysql_password.secret"
-  passbotl_email_transport_default_password:
-    file: "./secrets/passbotl_email_transport_default_password.secret"
+  passbolt_email_transport_default_password:
+    file: "./secrets/passbolt_email_transport_default_password.secret"
