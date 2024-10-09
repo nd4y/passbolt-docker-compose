@@ -46,9 +46,9 @@ cd /opt/passbolt
 ```
 echo '$uper$ecretPa$$w0rd' > /opt/passbolt/secrets/mysql_password.secret'
 ```
-7. Записать пароль к SMTP серверу для отправки почты Passbolt в /opt/passbolt/secrets/passbotl_email_transport_default_password.secret
+7. Записать пароль к SMTP серверу для отправки почты Passbolt в /opt/passbolt/secrets/passbolt_email_transport_default_password.secret
 ```
-echo '$uper$ecretPa$$w0rd' > /opt/passbolt/secrets/passbotl_email_transport_default_password.secret'
+echo '$uper$ecretPa$$w0rd' > /opt/passbolt/secrets/passbolt_email_transport_default_password.secret'
 ```
 8. Записать API Token Cloudflare в /opt/passbolt/secrets/cf_api_token.secret
 ```
